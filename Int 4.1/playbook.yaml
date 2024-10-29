@@ -1,0 +1,130 @@
+- name: Install postgresql-16
+  hosts: debian11
+  become: yes
+  vars:
+    postgres_passwd: "123123123"
+
+  tasks:
+
+    - name: install curl gpg
+      apt:
+        name:
+        - curl
+        - gpg
+        - python3
+        - python3-pip
+        - python3-dev
+        - libpq-dev
+
+    - name: add key
+      apt_key:
+        url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+
+    - name: add repo
+      apt_repository:
+        repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_facts['lsb']['codename'] }}-pgdg main"
+        filename: "pgdg"
+
+    - name: install postgresql-16
+      apt:
+        update_cache: yes
+        name: "postgresql-16"
+
+    - name: install
+      apt:
+        name:
+        - sudo
+        - ufw
+        - fail2ban
+        - rsyslog
+
+    - name: install psycopg2
+      pip:
+        name: psycopg2
+
+
+    - name: ufw 5432
+      community.general.ufw:
+        rule: allow
+        direction: in
+        to_port: 5432
+        proto: tcp
+
+    - name: configure fail2ban jail.local
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime  = 600
+          findtime = 600
+          maxretry = 5
+
+          [sshd]
+          enabled  = true
+          port     = 22
+          logpath  = %(sshd_log)s
+          maxretry = 3
+
+    - name: restart fail2ban
+      systemd_service:
+        name: fail2ban
+        state: restarted
+        enabled: true
+
+    - name: set password for user postgres
+      community.postgresql.postgresql_user:
+        name: postgres
+        password: "{{ postgres_passwd }}"
+        role_attr_flags: "SUPERUSER"
+      become: true
+      become_user: postgres
+
+    - name: modify pg_hba
+      community.postgresql.postgresql_pg_hba:
+        dest: /etc/postgresql/16/main/pg_hba.conf
+        contype: host
+        users: all
+        source: 0.0.0.0/0
+        databases: all
+        method: md5
+
+    - name: change authentication method for postgres user
+      ansible.builtin.lineinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        regexp: '^local\s+all\s+postgres\s+peer$'
+        line: 'local  all  postgres  md5'
+        state: present
+
+    - name: enable and restart postgresql-16.service
+      systemd_service:
+        name: postgresql@16-main.service
+        state: restarted
+        enabled: true
+
+    - name: configure postgresql
+      community.postgresql.postgresql_set:
+        name: listen_addresses
+        value: "*"
+        login_password: "{{ postgres_passwd }}"
+
+    - name: restart postgresql-16.service
+      systemd_service:
+        name: postgresql@16-main.service
+        state: restarted
+
+    - name: Configure SSH Daemon for basic security
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      with_items:
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+        - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+        - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+
+    - name: Restart SSH to apply changes
+      service:
+        name: ssh
+        state: restarted
+
