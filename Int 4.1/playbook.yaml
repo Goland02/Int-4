@@ -5,8 +5,7 @@
     postgres_passwd: "123123123"
 
   tasks:
-
-    - name: install curl gpg
+    - name: installing the necessary packages
       apt:
         name:
         - curl
@@ -15,6 +14,14 @@
         - python3-pip
         - python3-dev
         - libpq-dev
+        - sudo
+        - ufw
+        - fail2ban
+        - rsyslog
+
+    - name: install psycopg2
+      pip:
+        name: psycopg2
 
     - name: add key
       apt_key:
@@ -30,20 +37,7 @@
         update_cache: yes
         name: "postgresql-16"
 
-    - name: install
-      apt:
-        name:
-        - sudo
-        - ufw
-        - fail2ban
-        - rsyslog
-
-    - name: install psycopg2
-      pip:
-        name: psycopg2
-
-
-    - name: ufw 5432
+    - name: ufw 5432 allow
       community.general.ufw:
         rule: allow
         direction: in
@@ -51,7 +45,7 @@
         proto: tcp
 
     - name: configure fail2ban jail.local
-      ansible.builtin.copy:
+      copy:
         dest: /etc/fail2ban/jail.local
         content: |
           [DEFAULT]
@@ -89,7 +83,7 @@
         method: md5
 
     - name: change authentication method for postgres user
-      ansible.builtin.lineinfile:
+      lineinfile:
         path: /etc/postgresql/16/main/pg_hba.conf
         regexp: '^local\s+all\s+postgres\s+peer$'
         line: 'local  all  postgres  md5'
@@ -112,7 +106,7 @@
         name: postgresql@16-main.service
         state: restarted
 
-    - name: Configure SSH Daemon for basic security
+    - name: configure SSH 
       lineinfile:
         path: /etc/ssh/sshd_config
         regexp: "{{ item.regexp }}"
@@ -123,7 +117,7 @@
         - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
         - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
 
-    - name: Restart SSH to apply changes
+    - name: restart SSH
       service:
         name: ssh
         state: restarted
